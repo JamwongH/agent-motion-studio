@@ -18,8 +18,9 @@ export const catalog=[
 export const defaults=id=>Object.fromEntries(catalog.find(c=>c.id===id).fields.map(f=>[f.key,f.default]));
 export const roadmap=[
  {priority:'已实现',name:'组件注册与可视化参数',detail:'六类共用组件、动态预览、保存封装、风格管理、版本化配置。'},
- {priority:'已实现',name:'真实素材与源时间映射',detail:'本地图片/视频、人物取景、两路对照；单组件精确 seek 后捕获。'},
- {priority:'下一步',name:'整片多轨与原声',detail:'口播、录屏、案例各有源时间；加入时间线编排、锁定原声和完整 MP4 导出。'},
+ {priority:'已实现',name:'真实素材与源时间映射',detail:'本地图片/视频/音频、人物取景、两路对照；全片时间与每路素材源时间分开管理。'},
+ {priority:'已实现',name:'统一时间线与原声预览',detail:'组件、独立画面、文字和音频四类轨道；拖动、关键帧、撤销重做、保存项目与整片 HTML 预览。'},
+ {priority:'下一步',name:'剪映工程与 MP4 导出',detail:'读取统一项目数据，转换原生可编辑轨道并渲染复杂效果。尚未集成 pyJianYingDraft，也未验证剪映工程。'},
  {priority:'下一步',name:'人物抠像与边缘修复',detail:'复用上游 RVM，加入检查界面与透明层配对。当前支持原背景小窗和透明 PNG。'},
  {priority:'下一步',name:'素材化高级转场',detail:'真实纸纤维、漏光、分片、环形字；当前撕纸为程序化示意。'},
  {priority:'独立制作',name:'高质量案例 CG',detail:'键盘拆解、耳机材质、角色或 FPV 是独立素材；工作台负责承载，不承诺自动生成。'},

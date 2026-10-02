@@ -1,0 +1,82 @@
+// Actual timeline UI, independent source frames, audio transport and preview/export parity.
+import assert from 'node:assert/strict';
+import {mkdtemp,mkdir,readFile,writeFile,rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import path from 'node:path';
+import {fileURLToPath} from 'node:url';
+import {execFileSync} from 'node:child_process';
+import {launchBrowser} from './browser.mjs';
+import {startStudio} from './studio-server.mjs';
+const root=fileURLToPath(new URL('..',import.meta.url)),out=path.join(root,'artifacts','timeline');
+const dir=await mkdtemp(path.join(tmpdir(),'studio-timeline-'));let server,browser,projectId;
+await mkdir(out,{recursive:true});
+try {
+  const video=path.join(dir,'recording.mp4'),voice=path.join(dir,'voice.wav'),ffmpeg=process.env.FFMPEG_PATH??'ffmpeg';
+  execFileSync(ffmpeg,['-y','-v','error','-f','lavfi','-i','color=c=red:s=320x180:r=30:d=2','-f','lavfi','-i','color=c=green:s=320x180:r=30:d=2','-filter_complex','[0:v][1:v]concat=n=2:v=1:a=0[v]','-map','[v]','-c:v','libx264','-pix_fmt','yuv420p',video]);
+  execFileSync(ffmpeg,['-y','-v','error','-f','lavfi','-i','sine=frequency=440:duration=4','-c:a','pcm_s16le',voice]);
+  server=await startStudio({port:0,dataDir:path.join(dir,'data')});browser=await launchBrowser({args:['--autoplay-policy=no-user-gesture-required']});
+  const page=await browser.newPage({viewport:{width:1500,height:1120}}),errors=[];
+  page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(/WebGL.*(INVALID|error)|Texture.*resiz/i.test(m.text()))errors.push(m.text());});
+  await page.goto(server.url+'/studio/#timeline');await page.waitForFunction(()=>window.studio?.timeline?.ready);
+  assert.equal(await page.locator('[data-clip]').count(),4);
+  await page.locator('[data-clip="clip-example-1"]').click();await page.evaluate(()=>window.studio.timeline.seek(6));
+  await page.screenshot({path:path.join(out,'timeline.png'),fullPage:true});
+  await page.locator('[data-clip="clip-example-caption"]').click();await page.locator('#tl-inspector').getByLabel('文字内容',{exact:true}).fill('这句字幕可以单独修改');await page.locator('#tl-inspector').getByLabel('文字内容',{exact:true}).press('Tab');
+  assert.equal(await page.evaluate(()=>window.studio.timeline.project.tracks[2].clips[0].text),'这句字幕可以单独修改');
+  const bar=await page.locator('[data-clip="clip-example-caption"]').boundingBox(),lane=await page.locator('[data-lane="track-text"]').boundingBox();
+  await page.mouse.move(bar.x+bar.width/2,bar.y+12);await page.mouse.down();await page.mouse.move(bar.x+bar.width/2+lane.width/16,bar.y+12,{steps:8});await page.mouse.up();
+  assert.ok(Math.abs(await page.evaluate(()=>window.studio.timeline.project.tracks[2].clips[0].startFrame)-150)<=1,'dragging snaps to frames');
+  await page.locator('#tl-undo').click();assert.equal(await page.evaluate(()=>window.studio.timeline.project.tracks[2].clips[0].startFrame),120);
+  await page.locator('#tl-redo').click();assert.ok(Math.abs(await page.evaluate(()=>window.studio.timeline.project.tracks[2].clips[0].startFrame)-150)<=1);
+  await page.locator('[data-clip="clip-example-caption"]').click();await page.evaluate(()=>window.studio.timeline.seek(6));
+  await page.locator('#tl-key-value').fill('150');await page.locator('#tl-set-key').click();assert.equal(await page.evaluate(()=>window.studio.timeline.project.tracks[2].clips[0].keyframes.length),1);
+  await page.locator('[data-clip="clip-example-1"]').click();
+  await page.locator('#tl-upload-file').setInputFiles(video);await page.waitForFunction(()=>window.studio.timeline.assets.some(a=>a.name==='recording.mp4'));
+  const videoId=await page.evaluate(()=>window.studio.timeline.assets.find(a=>a.name==='recording.mp4').id);
+  await page.locator('#tl-inspector').getByLabel('录屏或截图',{exact:true}).selectOption(videoId);
+  await page.locator('#tl-inspector').getByLabel('录屏或截图入点（秒）',{exact:true}).fill('1');await page.locator('#tl-inspector').getByLabel('录屏或截图入点（秒）',{exact:true}).press('Tab');
+  await page.locator('#tl-inspector').getByLabel('录屏或截图速度',{exact:true}).fill('1.5');await page.locator('#tl-inspector').getByLabel('录屏或截图速度',{exact:true}).press('Tab');
+  await page.locator('#tl-inspector').getByLabel('人物素材',{exact:true}).selectOption(videoId);
+  await page.locator('#tl-inspector').getByLabel('人物素材入点（秒）',{exact:true}).fill('.25');await page.locator('#tl-inspector').getByLabel('人物素材入点（秒）',{exact:true}).press('Tab');
+  const samples=await page.evaluate(async()=>{
+    const e=window.studio.timeline;await e.seek(5);
+    function pixel(key){const v=e.player.visual.media.get(key),c=document.createElement('canvas');c.width=c.height=1;const ctx=c.getContext('2d');ctx.drawImage(v,0,0,1,1);return{time:v.currentTime,pixel:[...ctx.getImageData(0,0,1,1).data]};}
+    return{screen:pixel('clip-example-1-screen'),person:pixel('clip-example-1-presenter')};
+  });
+  assert.ok(Math.abs(samples.screen.time-2.5)<.01&&samples.screen.pixel[1]>100&&samples.screen.pixel[0]<20);
+  assert.ok(Math.abs(samples.person.time-1.25)<.01&&samples.person.pixel[0]>200&&samples.person.pixel[1]<20);
+  const a=await page.evaluate(async()=>{await window.studio.timeline.seek(5);return window.studio.timeline.player.capture();});
+  await page.evaluate(()=>window.studio.timeline.seek(11));await page.evaluate(()=>window.studio.timeline.seek(5));assert.equal(await page.evaluate(()=>window.studio.timeline.player.capture()),a);
+  await page.locator('#tl-add-audio').click();await page.locator('#tl-inspector').getByLabel('起点（秒）',{exact:true}).fill('4');await page.locator('#tl-inspector').getByLabel('起点（秒）',{exact:true}).press('Tab');
+  await page.locator('#tl-inspector').getByLabel('时长（秒）',{exact:true}).fill('2');await page.locator('#tl-inspector').getByLabel('时长（秒）',{exact:true}).press('Tab');
+  await page.locator('#tl-upload-file').setInputFiles(voice);await page.waitForFunction(()=>window.studio.timeline.assets.some(a=>a.name==='voice.wav'));
+  const voiceId=await page.evaluate(()=>window.studio.timeline.assets.find(a=>a.name==='voice.wav').id);await page.locator('#tl-inspector').getByLabel('声音素材',{exact:true}).selectOption(voiceId);
+  for(const [label,value]of [['素材入点（秒）','.5'],['音量','.35'],['淡入（秒）','.5']]){await page.locator('#tl-inspector').getByLabel(label,{exact:true}).fill(value);await page.locator('#tl-inspector').getByLabel(label,{exact:true}).press('Tab');}
+  await page.evaluate(()=>window.studio.timeline.seek(5));const audio=await page.evaluate(()=>{const e=[...window.studio.timeline.player.audio.values()][0].element;return{time:e.currentTime,volume:e.volume,paused:e.paused};});
+  assert.ok(Math.abs(audio.time-1.5)<.01);assert.equal(audio.volume,.35);assert.equal(audio.paused,true);
+  await page.locator('#tl-play').click();await page.waitForFunction(()=>[...window.studio.timeline.player.audio.values()].some(a=>!a.element.paused));
+  await page.locator('#tl-sound').click();assert.equal(await page.evaluate(()=>[...window.studio.timeline.player.audio.values()].every(a=>a.element.paused)),true);
+  await page.locator('#tl-play').click();await page.evaluate(()=>window.studio.timeline.seek(6));assert.equal(await page.evaluate(()=>[...window.studio.timeline.player.audio.values()].every(a=>a.element.paused)),true);
+  await page.locator('#tl-track-type').selectOption('visual');await page.locator('#tl-add-track').click();await page.evaluate(()=>window.studio.timeline.seek(0));await page.locator('#tl-add-visual').click();
+  const visualTrack=await page.evaluate(()=>window.studio.timeline.project.tracks.at(-1));assert.equal(visualTrack.type,'visual');assert.equal(visualTrack.clips.length,1,'new track is a usable insertion target');
+  await page.locator('#tl-inspector').getByLabel('画面素材',{exact:true}).selectOption(videoId);await page.evaluate(()=>window.studio.timeline.seek(1));assert.ok(await page.evaluate(()=>window.studio.timeline.player.resolved.panels.some(p=>p.id===window.studio.timeline.project.tracks.at(-1).clips[0].id)));
+  const visualBar=await page.locator('[data-clip="'+visualTrack.clips[0].id+'"]').boundingBox(),visualLane=await page.locator('[data-lane="'+visualTrack.id+'"]').boundingBox();
+  await page.mouse.move(visualBar.x+visualBar.width-3,visualBar.y+20);await page.mouse.down();await page.mouse.move(visualBar.x+visualBar.width-3+visualLane.width/16,visualBar.y+20,{steps:8});await page.mouse.up();assert.ok(Math.abs(await page.evaluate(()=>window.studio.timeline.project.tracks.at(-1).clips[0].durationFrames)-120)<=1,'right edge resizes on the frame grid');
+  await page.locator('#tl-name').fill('QA 统一时间线');await page.locator('#tl-name').press('Tab');await page.locator('#tl-save').click();await page.getByText('项目已保存在本机',{exact:true}).waitFor();
+  const saved=await page.evaluate(()=>window.studio.timeline.project);projectId=saved.id;
+  await page.reload();await page.waitForFunction(()=>window.studio?.timeline?.ready);assert.deepEqual(await page.evaluate(()=>window.studio.timeline.project),saved);
+  await page.evaluate(()=>window.studio.timeline.seek(5));const live=await page.evaluate(()=>window.studio.timeline.player.capture());
+  await page.locator('#tl-export-film').click();await page.locator('#tl-film-link').waitFor({state:'visible'});
+  const film=await browser.newPage({viewport:{width:720,height:1340}});film.on('pageerror',e=>errors.push(e.message));
+  await film.goto(server.url+await page.locator('#tl-film-link').getAttribute('href')+'?export=1');await film.waitForFunction(()=>window.film?.ready);await film.evaluate(()=>window.film.renderAt(5));assert.equal(await film.evaluate(()=>window.film.capture()),live,'workbench and exported project have identical pixels');
+  for(const t of [1,11]){await page.evaluate(t=>window.studio.timeline.seek(t),t);await film.evaluate(t=>window.film.renderAt(t),t);assert.equal(await film.evaluate(()=>window.film.capture()),await page.evaluate(()=>window.studio.timeline.player.capture()),'all project layers share preview/export semantics');}
+  const download=page.waitForEvent('download');await page.locator('#tl-export-json').click();const file=await download;assert.deepEqual(JSON.parse(await readFile(await file.path(),'utf8')),saved);
+  await page.locator('#tl-import-file').setInputFiles({name:'project.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(saved))});await page.getByText('时间线已导入',{exact:true}).waitFor();assert.deepEqual(await page.evaluate(()=>window.studio.timeline.project),saved);assert.equal(await page.locator('#tl-film-link').isVisible(),false);
+  await page.locator('[data-view="components"]').click();await page.locator('[data-view="timeline"]').click();await page.waitForFunction(()=>window.studio.timeline.ready);assert.deepEqual(await page.evaluate(()=>window.studio.timeline.project),saved);
+  await page.route('**/api/studio/projects',async route=>{await new Promise(r=>setTimeout(r,80));await route.continue();});
+  for(const view of ['components','timeline','components','timeline'])await page.locator('[data-view="'+view+'"]').click();await page.waitForFunction(()=>window.studio.timeline.ready);assert.deepEqual(await page.evaluate(()=>window.studio.timeline.project),saved);await page.unroute('**/api/studio/projects');
+  await page.evaluate(()=>window.studio.timeline.seek(6));await page.screenshot({path:path.join(out,'real-media-timeline.png'),fullPage:true});
+  await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);await page.screenshot({path:path.join(out,'mobile.png'),fullPage:true});
+  assert.deepEqual(errors,[]);await writeFile(path.join(out,'validation.json'),JSON.stringify({passed:true,checks:['project timeline entry','independent text edits','frame-snapped drag and resize','undo and redo','keyframes','independent video source offsets and rates','nonsequential seek','audio offset, volume, play and mute','audio clip boundary','new tracks and visual overlays','project save and reload','workbench/export pixel parity at three times','JSON download and import','rapid navigation retains draft','mobile overflow','no page errors']},null,2));
+  console.log('Timeline browser checks passed. Screenshots: '+out);
+}finally{if(browser)await browser.close();if(server)await server.close();await rm(dir,{recursive:true,force:true});if(projectId)await rm(path.join(root,'work','studio-projects',projectId),{recursive:true,force:true});}

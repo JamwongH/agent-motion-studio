@@ -1,6 +1,6 @@
 # Agent Motion
 
-> **Agent Motion Studio fork** — This fork adds a local component workbench for AI tutorials: live previews, presenter windows, perspective recordings, collage/tear/comparison components, style presets and reusable scene exports. Start with `npm ci` then `npm run studio`; open http://127.0.0.1:8794/studio/. See [workbench guide](docs/studio.md) and [reference gap analysis](docs/reference-gap-analysis.md). Full-film timeline/audio/MP4 export and B-roll integration are future work. The upstream noncommercial LICENSE and NOTICE remain applicable. The original project introduction follows.
+> **Agent Motion Studio fork** — This fork adds a local component workbench and unified project timeline for AI tutorials: reusable scenes, independent visual/text/audio tracks, per-source timing, keyframes, local persistence and continuous project previews. Start with `npm ci` then `npm run studio`; open http://127.0.0.1:8794/studio/#timeline. See [workbench guide](docs/studio.md), [timeline contract](docs/timeline.md) and [reference gap analysis](docs/reference-gap-analysis.md). Jianying draft/MP4 export and B-roll integration are future work; pyJianYingDraft has not been integrated. The upstream noncommercial LICENSE and NOTICE remain applicable. The original project introduction follows.
 
 **Turn talking-head footage into a designed film with a coding agent.** Recording + complete SRT + brief → MP4 + editable Three.js project.
 
