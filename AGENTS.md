@@ -1,5 +1,9 @@
 # Three.js 视频制作
 
+> Agent Motion Studio fork 修改说明：新增工作台路由和人物小窗适用范围；下方上游制作入口保留。
+
+- 维护、调用或扩展本 fork 的组件工作台与个人风格，读取项目本地 [AI Tutorial Studio](.agents/skills/ai-tutorial-studio/SKILL.md)。软件管理页开发不等同于整片制作；进入整片任务时按该 Skill 桥接原制作流程。
+
 本文件只负责 Skill 入口与使用关系；制作要求、适用边界和验收方法统一维护在对应 Skill 及其引用文件中。
 
 - 制作、修改或评审本项目的视频动效，先读取项目本地 [Motion Craft](.agents/skills/motion-craft/SKILL.md)。

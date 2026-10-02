@@ -1,0 +1,16 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {mkdtemp,rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import path from 'node:path';
+import {startStudio} from '../../scripts/studio-server.mjs';
+import {defaults,styles} from '../catalog.mjs';
+test('local API persists concurrent saves across restart and protects mutations',async()=>{const dataDir=await mkdtemp(path.join(tmpdir(),'motion-studio-test-'));let s;const ids=[];try{s=await startStudio({port:0,dataDir});const post=(route,v,headers={})=>fetch(s.url+'/api/studio/'+route,{method:'POST',headers:{'Content-Type':'application/json',...headers},body:JSON.stringify(v)});const preset={schemaVersion:1,id:'api-test',name:'测试封装',componentId:'screen-panel',componentVersion:1,params:defaults('screen-panel'),style:styles[0],assets:{}};
+ assert.equal((await fetch(s.url+'/studio/')).status,200);assert.equal((await fetch(s.url+'/.git/config')).status,403);
+ assert.equal((await post('presets',preset,{Origin:'https://elsewhere.example'})).status,403);
+ assert.equal((await post('presets',{...preset,params:{zoom:100}})).status,400);
+ const results=await Promise.all(Array.from({length:8},(_,i)=>post('presets',{...preset,id:'api-test-'+i})));results.forEach(r=>assert.equal(r.status,201));
+ const image=await fetch(s.url+'/api/studio/assets',{method:'POST',headers:{'Content-Type':'image/png','X-File-Name':encodeURIComponent('中文素材.png')},body:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aD1sAAAAASUVORK5CYII=','base64')});assert.equal(image.status,201);assert.equal((await image.json()).name,'中文素材.png');
+ const id='test-scene-'+Date.now();ids.push(id);const exported=await post('export',{...preset,id});assert.equal(exported.status,201);const {url}=await exported.json();assert.equal((await fetch(s.url+url)).status,200);assert.match(await(await fetch(s.url+url)).text(),/window.film/);
+ await s.close();s=await startStudio({port:0,dataDir});const data=await(await fetch(s.url+'/api/studio/catalog')).json();assert.equal(data.presets.length,8);assert.equal((await(await fetch(s.url+'/api/studio/assets')).json()).assets.length,1);
+ }finally{if(s)await s.close();await rm(dataDir,{recursive:true,force:true});for(const id of ids)await rm(new URL('../../work/studio-scenes/'+id,import.meta.url),{recursive:true,force:true});}});
