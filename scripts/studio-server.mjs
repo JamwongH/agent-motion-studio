@@ -7,11 +7,13 @@ import {randomUUID} from 'node:crypto';
 import {startServer} from '../serve.mjs';
 import {catalog,styles,roadmap} from '../studio/catalog.mjs';
 import {validatePreset,validateStyle,validId} from '../studio/core/contracts.mjs';
+import {draftAvailability,exportDraft} from './jianying/export.mjs';
+import {createDraftPlan} from '../studio/export/plan.mjs';
 import {validateProject,projectAssetIds} from '../studio/timeline/model.mjs';
 const root=fileURLToPath(new URL('..',import.meta.url));
 export async function startStudio({port=8794,dataDir=path.join(root,'studio-data')}={}){
  await mkdir(path.join(dataDir,'assets'),{recursive:true});const upstream=await startServer({port:0,root});const assetServer=await startServer({port:0,root:dataDir});
- const locks=new Map();
+ const locks=new Map(),jobs=new Map();let draftQueue=Promise.resolve();
  async function read(name,fallback){try{return JSON.parse(await readFile(path.join(dataDir,name),'utf8'));}catch(e){if(e.code==='ENOENT')return fallback;throw e;}}
  async function write(name,data){const temp=path.join(dataDir,name+'.'+randomUUID()+'.tmp');await writeFile(temp,JSON.stringify(data,null,2));await rename(temp,path.join(dataDir,name));}
  async function mutate(name,fallback,fn){const old=locks.get(name)||Promise.resolve();const task=old.catch(()=>{}).then(async()=>{const next=fn(await read(name,fallback));await write(name,next);return next;});locks.set(name,task);return task;}
@@ -23,6 +25,21 @@ export async function startStudio({port=8794,dataDir=path.join(root,'studio-data
   if(u.pathname==='/'){res.writeHead(302,{Location:'/studio/'}).end();return;}
   if(!u.pathname.startsWith('/api/studio/')){const assetRoute=u.pathname.startsWith('/studio-data/');if(assetRoute&&!/^\/studio-data\/assets\/[a-f0-9-]+\.(png|jpg|webp|mp4|mov|webm|wav|mp3|m4a)$/.test(u.pathname)){send(res,403,{error:'素材路径无效'});return;}const target=assetRoute?assetServer.url+u.pathname.slice('/studio-data'.length):upstream.url+req.url;const proxy=http.request(target,{method:req.method,headers:{...req.headers,host:new URL(target).host}},r=>{const headers={...r.headers};if(target.endsWith('.m4a'))headers['content-type']='audio/mp4';if(target.endsWith('.mov'))headers['content-type']='video/quicktime';res.writeHead(r.statusCode,headers);r.pipe(res);});proxy.on('error',()=>res.writeHead(502).end());req.pipe(proxy);return;}
   if(req.method!=='GET'&&req.headers.origin&&req.headers.origin!=='http://'+req.headers.host){send(res,403,{error:'仅允许当前工作台保存'});return;}
+  if(req.method==='GET'&&u.pathname==='/api/studio/jianying-status'){send(res,200,await draftAvailability());return;}
+  if(req.method==='GET'&&u.pathname.startsWith('/api/studio/jianying-jobs/')){const job=jobs.get(u.pathname.split('/').at(-1));send(res,job?200:404,job||{error:'导出任务不存在，请重新导出'});return;}
+  if(req.method==='POST'&&u.pathname==='/api/studio/jianying-export'){
+   const project=validateProject(JSON.parse((await body(req,4194304)).toString('utf8')));createDraftPlan(project);
+   if([...jobs.values()].filter(j=>['queued','running'].includes(j.status)).length>=3){send(res,409,{error:'已有三个导出任务，请等待完成'});return;}
+   const available=await draftAvailability();if(!available.ready){send(res,503,available);return;}
+   const assets=await read('assets.json',[]);for(const id of projectAssetIds({...project,tracks:project.tracks.filter(t=>t.enabled)}))if(!assets.some(a=>a.id===id))throw Error('项目缺少关联素材，请重新绑定');
+   const id=randomUUID(),job={id,projectId:project.id,status:'queued',progress:0,message:'等待导出',createdAt:new Date().toISOString()};jobs.set(id,job);
+   if(jobs.size>40)for(const[k,j]of jobs)if(!['queued','running'].includes(j.status)){jobs.delete(k);break;}
+   draftQueue=draftQueue.catch(()=>{}).then(async()=>{job.status='running';try{
+    const result=await exportDraft({project,assets,dataDir,url:'http://127.0.0.1:'+server.address().port,jobId:id,onProgress:update=>Object.assign(job,update)});
+    Object.assign(job,{status:'complete',result:{...result,url:'/work/jianying-exports/'+id+'/draft-'+project.id+'.zip',reportUrl:'/work/jianying-exports/'+id+'/draft-'+project.id+'/export-report.json'}});
+   }catch(e){Object.assign(job,{status:'failed',error:e.message,message:'导出失败'});}});
+   send(res,202,job);return;
+  }
   if(req.method==='GET'&&u.pathname==='/api/studio/catalog'){send(res,200,{catalog,presets:await read('presets.json',[]),styles:[...styles,...await read('styles.json',[])],roadmap});return;}
   if(req.method==='GET'&&u.pathname==='/api/studio/assets'){send(res,200,{assets:await read('assets.json',[])});return;}
   if(req.method==='GET'&&u.pathname==='/api/studio/projects'){send(res,200,{projects:await read('projects.json',[])});return;}

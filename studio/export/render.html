@@ -1,0 +1,5 @@
+<!doctype html><meta charset="utf-8"><link rel="stylesheet" href="/studio/fonts.css"><style>body{margin:0}canvas{display:block;width:720px;height:1280px}</style><div id="scene"></div><script type="module">
+import{TimelinePlayer}from'/studio/timeline/player.mjs';import{loadFonts}from'/studio/core/player.mjs';
+await loadFonts();const player=new TimelinePlayer(document.getElementById('scene'));player.soundEnabled=false;
+window.draftRenderer={ready:true,setProject:(project,assets)=>player.setProject(project,assets),render:async time=>{await player.renderAt(time);return player.capture();}};
+</script>

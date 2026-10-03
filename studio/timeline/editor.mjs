@@ -85,7 +85,7 @@ export class TimelineEditor {
     this.container.innerHTML=`<div class="tl-project-bar"><select id="tl-projects" aria-label="已保存的项目"></select><input id="tl-name" aria-label="项目名称" maxlength="60"><span id="tl-dirty" class="tl-save-state"></span><button id="tl-new" class="secondary">新建</button><button id="tl-example" class="secondary">载入示例</button><button id="tl-save" class="primary">保存项目</button></div>
       <div class="tl-workspace"><section class="tl-stage"><div class="tl-stage-top"><span>整片预览</span><span id="tl-frame"></span></div><div id="tl-preview"></div><div class="tl-transport"><button id="tl-play" class="secondary">▶ 播放</button><button id="tl-sound" class="secondary" aria-pressed="true">声音开启</button><input id="tl-scrub" type="range" min="0" step=".001" value="0" aria-label="项目预览时间"><output id="tl-clock"></output></div></section><section class="tl-properties"><div class="tl-properties-top"><h2>片段属性</h2><span>各轨道独立编辑</span></div><div id="tl-inspector"></div></section></div>
       <section class="tl-board"><div class="tl-board-toolbar"><strong>统一时间线</strong><label>时长 <input id="tl-duration" type="number" min=".1" max="600" step=".1" aria-label="项目时长"> 秒</label><button id="tl-undo" class="secondary">撤销</button><button id="tl-redo" class="secondary">重做</button><span class="tl-board-hint">拖动片段调整起点 · 拖动右边缘调整时长</span></div><div class="tl-add-bar"><select id="tl-component" aria-label="添加的组件"></select><button id="tl-add-scene" class="secondary">＋ 镜头</button><button id="tl-add-visual" class="secondary">＋ 画面</button><button id="tl-add-text" class="secondary">＋ 字幕</button><button id="tl-add-audio" class="secondary">＋ 原声 / 音乐</button><select id="tl-track-type" aria-label="新增轨道类型">${['visual','text','audio'].map(t=>option(t,typeName[t])).join('')}</select><button id="tl-add-track" class="secondary">＋ 轨道</button></div><div id="tl-tracks"></div></section>
-      <div class="tl-export-bar"><button id="tl-export-json" class="secondary">导出时间线 JSON</button><button id="tl-import-json" class="secondary">导入时间线</button><button id="tl-export-film" class="primary">生成整片预览</button><a id="tl-film-link" hidden target="_blank" rel="noopener">打开独立项目预览 ↗</a><span>剪映工程导出器待接入</span></div><input hidden id="tl-import-file" type="file" accept=".json"><input hidden id="tl-upload-file" type="file" accept="image/png,image/jpeg,image/webp,video/mp4,video/quicktime,video/webm,audio/wav,audio/mpeg,audio/mp4">
+      <div class="tl-export-bar"><button id="tl-export-json" class="secondary">导出时间线 JSON</button><button id="tl-import-json" class="secondary">导入时间线</button><button id="tl-export-film" class="primary">生成整片预览</button><a id="tl-film-link" hidden target="_blank" rel="noopener">打开独立项目预览 ↗</a><button id="tl-export-jianying" class="primary">导出剪映工程</button><a id="tl-draft-link" hidden>下载剪映草稿包 ↓</a><a id="tl-draft-report" hidden target="_blank" rel="noopener">查看分层说明 ↗</a><span id="tl-draft-status" role="status">组件镜头渲染为视频；独立画面、字幕、音频可编辑</span></div><input hidden id="tl-import-file" type="file" accept=".json"><input hidden id="tl-upload-file" type="file" accept="image/png,image/jpeg,image/webp,video/mp4,video/quicktime,video/webm,audio/wav,audio/mpeg,audio/mp4">
       <p class="small-note">镜头、独立画面和文字分层；声音由音频轨道播放。没有绑定素材时显示占位画面。项目保存到本机，独立预览需要当前工作台服务。</p>`;
     this.drawProjectControls();
     this.el('tl-component').innerHTML=catalog.map(c=>option('base:'+c.id,c.name)).join('')+this.data.presets.map(p=>option('preset:'+p.id,'我的封装 · '+p.name)).join('');
@@ -118,6 +118,7 @@ export class TimelineEditor {
     };
     this.el('tl-export-json').onclick=()=>this.download(this.project.id+'.json',JSON.stringify(validateProject(this.project),null,2));
     this.el('tl-export-film').onclick=()=>this.serialize(async()=>{const p=validateProject(this.project),result=await this.api('project-export',p);this.el('tl-film-link').href=result.url;this.el('tl-film-link').hidden=false;this.toast('整片预览已生成');});
+    this.el('tl-export-jianying').onclick=()=>this.exportJianying();
     this.el('tl-import-json').onclick=()=>this.el('tl-import-file').click();
     this.el('tl-import-file').onchange=e=>this.serialize(async()=>{const file=e.target.files[0];if(!file)return;const p=validateProject(JSON.parse(await file.text()));const missing=projectAssetIds(p).filter(id=>!this.assets.some(a=>a.id===id));if(missing.length)throw Error('导入项目的关联素材不在本机，请先添加素材并修正绑定编号');this.pause();this.drafts.set(this.project.id,{project:this.project,dirty:this.dirty});this.project=p;this.dirty=true;this.selected=null;this.selectedTrackId=null;this.time=0;this.el('tl-film-link').hidden=true;this.undo=[];this.redo=[];this.drawProjectControls();this.drawTracks();this.drawInspector();await this.render(0);e.target.value='';this.toast('时间线已导入');});
     this.el('tl-upload-file').onchange=e=>this.upload(e.target.files[0]);
@@ -141,6 +142,21 @@ export class TimelineEditor {
       b.onpointerdown=e=>this.drag(e,b);
       b.onclick=()=>{if(this.dragged){this.dragged=false;return;}this.selectedTrackId=b.dataset.track;this.selected={trackId:b.dataset.track,clipId:b.dataset.clip};this.drawInspector();this.drawTracks();const c=this.locate().clip;this.seek(c.startFrame/this.project.fps);};
     });
+  }
+  async exportJianying() {
+    if(this.exporting)return;this.pause();this.exporting=true;
+    const project=validateProject(this.project),epoch=this.epoch;
+    const update=job=>{if(!this.mounted||this.epoch!==epoch)return;this.el('tl-export-jianying').disabled=this.exporting;this.el('tl-draft-status').textContent=job.message+(job.progress!=null?' · '+job.progress+'%':'');};
+    if(this.mounted){this.el('tl-draft-link').hidden=true;this.el('tl-draft-report').hidden=true;}update({message:'正在检查导出环境'});
+    try {
+      let job=await this.api('jianying-export',project);
+      while(['queued','running'].includes(job.status)){
+        update(job);await new Promise(resolve=>setTimeout(resolve,700));job=await this.api('jianying-jobs/'+job.id);
+      }
+      if(job.status==='failed')throw Error(job.error);
+      if(this.mounted&&this.epoch===epoch){this.el('tl-draft-link').href=job.result.url;this.el('tl-draft-link').download='';this.el('tl-draft-link').hidden=false;this.el('tl-draft-report').href=job.result.reportUrl;this.el('tl-draft-report').hidden=false;}
+      update(job);this.toast('剪映草稿已生成，组件内部元素已渲染，详见分层说明');
+    }catch(e){update({message:e.message});this.toast(e.message);}finally{this.exporting=false;if(this.mounted)this.el('tl-export-jianying').disabled=false;}
   }
   drag(e,button) {
     if(e.button!==0)return;

@@ -1,0 +1,5 @@
+pyJianYingDraft==0.3.0
+pymediainfo==7.0.1
+imageio==2.38.0
+numpy==2.5.3
+pillow==12.3.0

@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "studio": "node scripts/studio-server.mjs",
-    "test:studio": "node --test studio/tests/contracts.test.mjs studio/tests/server.test.mjs studio/tests/timeline.test.mjs",
+    "test:studio": "node --test studio/tests/contracts.test.mjs studio/tests/server.test.mjs studio/tests/timeline.test.mjs studio/tests/jianying.test.mjs",
     "check:timeline": "node scripts/studio-timeline-check.mjs",
     "check:studio": "node scripts/studio-browser-check.mjs",
     "serve": "node serve.mjs",
@@ -18,7 +18,8 @@
     "package:release": "node scripts/package-release.mjs",
     "onboard": "node scripts/bootstrap.mjs",
     "matte": "node scripts/matte.mjs",
-    "matting:smoke": "node scripts/matting-smoke.mjs"
+    "matting:smoke": "node scripts/matting-smoke.mjs",
+    "check:jianying": "node scripts/studio-jianying-check.mjs"
   },
   "dependencies": {
     "three": "0.186.0",
